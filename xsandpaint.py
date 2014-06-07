@@ -21,17 +21,17 @@ HOST = 'localhost'
 
 #COLOR_PATH = 'color/dark_cyan_white_black.gif'
 
-NUM = 100 # number of nodes
+NUM = 500 # number of nodes
 MAXFS = 10 # max friendships pr node
 
-SIZE = 2000 # size of png image
-DRAW_ITT = 4000
+SIZE = 20000 # size of png image
+DRAW_ITT = 2000
 
 BACK = [1.]*3
 FRONT = [0,0,0,0.05]
 GRAINS = 40
 ALPHA = 0.05 # opacity of drawn points
-STEPS = 6000
+STEPS = 1000
 
 ONE = 1./SIZE
 STP = ONE/15.
@@ -63,15 +63,15 @@ class Render(object):
     self.sur = sur
     self.ctx = ctx
 
-  def dot(self,x,y):
+  #def dot(self,x,y):
 
-    self.ctx.rectangle(x,y,ONE,ONE)
-    self.ctx.fill()
+    #self.ctx.rectangle(x,y,ONE,ONE)
+    #self.ctx.fill()
 
  
 class XRender(threading.Thread):
 
-  def __init__(self, r, channel, path):
+  def __init__(self, queue, channel, path):
     threading.Thread.__init__(self)
     self.itt = 0
 
@@ -79,37 +79,51 @@ class XRender(threading.Thread):
     self.channel = channel
 
     self.render = Render()
-    
-    self.redis = r
-    self.pubsub = self.redis.pubsub()
-    self.pubsub.subscribe(channel)
-  
-  def work(self, item):
+    self.queue = queue
 
-    d = loads(item['data'])
-    print d['itt']
+    self.queue.delete(channel)
+  
+  def work(self, d):
+    
+    ctx = self.render.ctx
     for x,y in zip(d['x'],d['y']):
-      self.render.dot(x,y)
+      #self.render.dot(x,y)
+      ctx.rectangle(x,y,ONE,ONE)
+      ctx.fill()
   
   def run(self):
 
-    for item in self.pubsub.listen():
-      if item['data'] == 'KILL':
-        self.pubsub.unsubscribe()
+    while True:
+
+      k,v = self.queue.blpop(self.channel)
+
+      d = loads(v)
+      action = d['action']
+
+      try:
+        itt = d['itt']
+        if not itt%100:
+          print 'draw',itt, self.queue.llen('1')
+      except KeyError:
+        pass
+
+      if action == 'DRAW':
+
+        self.work(d)
+
+      elif action == 'WRITE':
+        itt = d['itt']
+        fn = self.filename.format(itt,self.channel)
+        print self,'writing:',fn
+        self.render.sur.write_to_png(fn)
+        continue
+
+      elif action == 'KILL':
         print self, 'done!'
         break
 
-      if item['data'] == 'DRAW':
-        fn = self.filename.format(self.itt,self.channel)
-        print self,'writing:',fn
-        self.render.sur.write_to_png(fn)
-        self.itt += 1
-        continue
 
-      if item['type'] == 'message':
-        self.work(item)
-
-def connections(r,itt,X,Y,F,A,R):
+def connections(queue,itt,X,Y,F,A,R):
 
   indsx,indsy = F.nonzero()
   mask = indsx >= indsy 
@@ -127,7 +141,7 @@ def connections(r,itt,X,Y,F,A,R):
     xx.extend(xp)
     yy.extend(yp)
   
-  r.publish('1', dumps({'x':xx,'y':yy,'itt':itt}))
+  queue.rpush('1', dumps({'action':'DRAW','x':xx,'y':yy,'itt':itt}))
 
 def set_distances(X,Y,A,R):
 
@@ -167,13 +181,12 @@ def make_friends(i,F,R):
       j = cand_ind[k]
       F[[i,j],[j,i]] = True
       return
-        
 
-if __name__ == "__main__":
+def main():
 
-  r = redis.Redis(host=HOST,port=PORT)
+  queue = redis.Redis(host=HOST,port=PORT)
 
-  xrender = XRender(r,'1','./img/')
+  xrender = XRender(queue,'1','./img/')
   xrender.start()
 
   X = zeros(NUM,'float')
@@ -195,52 +208,57 @@ if __name__ == "__main__":
 
     for itt in xrange(STEPS):
 
-      set_distances(X,Y,A,R)
-      
-      SX[:] = 0.
-      SY[:] = 0.
+      try:
 
-      
-      for i in xrange(NUM):
-        xF = logical_not(F[i,:])
-        d = R[i,:]
-        a = A[i,:]
-        near = d > NEARL
-        near[xF] = False
-        far = d < FARL
-        far[near] = False
-        near[i] = False
-        far[i] = False
-        speed = FARL - d[far]
+        set_distances(X,Y,A,R)
+        
+        SX[:] = 0.
+        SY[:] = 0.
+        
+        for i in xrange(NUM):
+          xF = logical_not(F[i,:])
+          d = R[i,:]
+          a = A[i,:]
+          near = d > NEARL
+          near[xF] = False
+          far = d < FARL
+          far[near] = False
+          near[i] = False
+          far[i] = False
+          speed = FARL - d[far]
 
-        SX[near] += cos(a[near])
-        SY[near] += sin(a[near])
-        SX[far] -= speed*cos(a[far])
-        SY[far] -= speed*sin(a[far])
+          SX[near] += cos(a[near])
+          SY[near] += sin(a[near])
+          SX[far] -= speed*cos(a[far])
+          SY[far] -= speed*sin(a[far])
 
-      X += SX*STP
-      Y += SY*STP
+        X += SX*STP
+        Y += SY*STP
 
-      if random()<FRIENDSHIP_INITIATE_PROB:
+        if random()<FRIENDSHIP_INITIATE_PROB:
 
-        k = randint(NUM)
-        make_friends(k,F,R)
+          k = randint(NUM)
+          make_friends(k,F,R)
 
-      connections(r,itt,X,Y,F,A,R)
+        connections(queue,itt,X,Y,F,A,R)
 
-      if not itt % DRAW_ITT:
-        print '**************************'
+        if not itt%100:
+          print 'itteration:',itt
 
-        r.publish('1','DRAW')
+        if not itt%DRAW_ITT:
+          if itt>0:
+            queue.rpush('1',dumps({'action':'WRITE','itt':itt}))
 
+      except KeyboardInterrupt:
+        queue.lpush('1',dumps({'action':'KILL','itt':itt}))
+        break
 
-    #try:
-      #for i in xrange(100000):
-        #x = random()
-        #y = random()
-        #r.publish('1', dumps({'x':x,'y':y,'itt':i}))
   except Exception, e:
     print e
   finally:
-    r.publish('1', 'KILL')
+    queue.rpush('1',dumps({'action':'KILL','itt':itt}))
+
+
+if __name__ == "__main__":
+  main()
 
