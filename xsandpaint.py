@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import redis
-import threading
+from multiprocessing import Process, Queue
 
 import cairo, Image
 import numpy as np
@@ -12,12 +12,12 @@ from numpy import sin, cos, pi, arctan2, square,sqrt, logical_not,\
                   linspace, array, zeros
 from numpy.random import random, randint, shuffle
 
+
 PI = pi
 TWOPI = pi*2.
 
 PORT = 6379
 HOST = 'localhost'
-
 
 #COLOR_PATH = 'color/dark_cyan_white_black.gif'
 
@@ -31,7 +31,7 @@ BACK = [1.]*3
 FRONT = [0,0,0,0.05]
 GRAINS = 40
 ALPHA = 0.05 # opacity of drawn points
-STEPS = 1000
+STEPS = 10000
 
 ONE = 1./SIZE
 STP = ONE/15.
@@ -43,11 +43,26 @@ NEARL = 0.02 # do not attempt to approach friends close than this
 FRIENDSHIP_RATIO = 0.1 # probability of friendship dens
 FRIENDSHIP_INITIATE_PROB = 0.05 # probability of friendship initation attempt
 
-class Render(object):
+ 
+class XRender():
 
-  def __init__(self):
+  def __init__(self, rds, channel, path):
+
+    self.filename = path+'test_{:08d}_q{:s}.png'
+    self.channel = channel
+
+    self.rds = rds
+
+    self.rds.delete(channel)
 
     self.__init_cairo()
+
+  def work(self, d):
+    
+    ctx = self.ctx
+    for x,y in zip(d['x'],d['y']):
+      ctx.rectangle(x,y,ONE,ONE)
+      ctx.fill()
 
   def __init_cairo(self):
 
@@ -63,39 +78,11 @@ class Render(object):
     self.sur = sur
     self.ctx = ctx
 
-  #def dot(self,x,y):
-
-    #self.ctx.rectangle(x,y,ONE,ONE)
-    #self.ctx.fill()
-
- 
-class XRender(threading.Thread):
-
-  def __init__(self, queue, channel, path):
-    threading.Thread.__init__(self)
-    self.itt = 0
-
-    self.filename = path+'/test_{:08d}_q{:s}.png'
-    self.channel = channel
-
-    self.render = Render()
-    self.queue = queue
-
-    self.queue.delete(channel)
-  
-  def work(self, d):
-    
-    ctx = self.render.ctx
-    for x,y in zip(d['x'],d['y']):
-      #self.render.dot(x,y)
-      ctx.rectangle(x,y,ONE,ONE)
-      ctx.fill()
-  
   def run(self):
 
     while True:
 
-      k,v = self.queue.blpop(self.channel)
+      k,v = self.rds.blpop(self.channel)
 
       d = loads(v)
       action = d['action']
@@ -103,7 +90,7 @@ class XRender(threading.Thread):
       try:
         itt = d['itt']
         if not itt%100:
-          print 'draw',itt, self.queue.llen('1')
+          print 'draw',itt, self.rds.llen('1')
       except KeyError:
         pass
 
@@ -115,7 +102,7 @@ class XRender(threading.Thread):
         itt = d['itt']
         fn = self.filename.format(itt,self.channel)
         print self,'writing:',fn
-        self.render.sur.write_to_png(fn)
+        self.sur.write_to_png(fn)
         continue
 
       elif action == 'KILL':
@@ -123,7 +110,7 @@ class XRender(threading.Thread):
         break
 
 
-def connections(queue,itt,X,Y,F,A,R):
+def connections(rds,itt,X,Y,F,A,R):
 
   indsx,indsy = F.nonzero()
   mask = indsx >= indsy 
@@ -141,7 +128,7 @@ def connections(queue,itt,X,Y,F,A,R):
     xx.extend(xp)
     yy.extend(yp)
   
-  queue.rpush('1', dumps({'action':'DRAW','x':xx,'y':yy,'itt':itt}))
+  rds.rpush('1', dumps({'action':'DRAW','x':xx,'y':yy,'itt':itt}))
 
 def set_distances(X,Y,A,R):
 
@@ -184,9 +171,10 @@ def make_friends(i,F,R):
 
 def main():
 
-  queue = redis.Redis(host=HOST,port=PORT)
+  rds = redis.Redis(host=HOST,port=PORT)
 
-  xrender = XRender(queue,'1','./img/')
+  render = XRender(rds,'1','/home/anders/x/xsandpaint/img/test')
+  xrender = Process(target=render.run)
   xrender.start()
 
   X = zeros(NUM,'float')
@@ -240,23 +228,23 @@ def main():
           k = randint(NUM)
           make_friends(k,F,R)
 
-        connections(queue,itt,X,Y,F,A,R)
+        connections(rds,itt,X,Y,F,A,R)
 
         if not itt%100:
           print 'itteration:',itt
 
         if not itt%DRAW_ITT:
           if itt>0:
-            queue.rpush('1',dumps({'action':'WRITE','itt':itt}))
+            rds.rpush('1',dumps({'action':'WRITE','itt':itt}))
 
       except KeyboardInterrupt:
-        queue.lpush('1',dumps({'action':'KILL','itt':itt}))
+        rds.lpush('1',dumps({'action':'KILL','itt':itt}))
         break
 
   except Exception, e:
-    print e
+    raise
   finally:
-    queue.rpush('1',dumps({'action':'KILL','itt':itt}))
+    rds.rpush('1',dumps({'action':'KILL','itt':itt}))
 
 
 if __name__ == "__main__":
