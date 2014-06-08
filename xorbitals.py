@@ -14,16 +14,16 @@ TWOPI = pi*2.
 PORT = 6379
 HOST = 'localhost'
 
-CANVAS_SIZE = 10000 # size of canvas
+CANVAS_SIZE = 20000 # size of canvas
 GRID_SIZE = 2 # number of canvases in each direction
 
 FILEPATH = './img/img'
 #COLOR_PATH = 'color/dark_cyan_white_black.gif'
 
-NUM = 200 # number of nodes
+NUM = 500 # number of nodes
 MAXFS = 10 # max friendships pr node
 
-DRAW_ITT = 1000
+DRAW_ITT = 4000
 
 BACK = [1.]*3
 FRONT = [0,0,0,0.05]
@@ -31,7 +31,7 @@ GRAINS = 40
 ALPHA = 0.05 # opacity of drawn points
 STEPS = 10000
 
-STP = 1./float(CANVAS_SIZE*GRID_SIZE)/5.
+STP = 1./float(CANVAS_SIZE*GRID_SIZE)/15.
 
 RAD = 0.26 # radius of starting circle
 FARL  = 0.13 # ignore "enemies" beyond this radius
