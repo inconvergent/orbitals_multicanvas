@@ -1,7 +1,9 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
+import Image
 import redis
+import os
 import numpy as np
 from numpy import sin, cos, pi, arctan2, square,sqrt, logical_not,\
                   linspace, array, zeros
@@ -14,24 +16,23 @@ TWOPI = pi*2.
 PORT = 6379
 HOST = 'localhost'
 
-CANVAS_SIZE = 20000 # size of canvas
+CANVAS_SIZE = 2000 # size of canvas
 GRID_SIZE = 2 # number of canvases in each direction
 
-FILEPATH = './img/img'
-#COLOR_PATH = 'color/dark_cyan_white_black.gif'
+COLOR_PATH = '../colors/dark_cyan_white_black.gif'
 
-NUM = 500 # number of nodes
+NUM = 50 # number of nodes
 MAXFS = 10 # max friendships pr node
 
-DRAW_ITT = 4000
+DRAW_ITT = 500
 
 BACK = [1.]*3
 FRONT = [0,0,0,0.05]
-GRAINS = 40
+GRAINS = 20
 ALPHA = 0.05 # opacity of drawn points
 STEPS = 10**7
 
-STP = 1./float(CANVAS_SIZE*GRID_SIZE)/15.
+STP = 1./float(CANVAS_SIZE)/15.
 
 RAD = 0.26 # radius of starting circle
 FARL  = 0.13 # ignore "enemies" beyond this radius
@@ -40,13 +41,44 @@ NEARL = 0.02 # do not attempt to approach friends close than this
 FRIENDSHIP_RATIO = 0.1 # probability of friendship dens
 FRIENDSHIP_INITIATE_PROB = 0.05 # probability of friendship initation attempt
 
+PATH = './cyan_gp_a'
+PATH += '_num{:d}_fs{:d}_near{:2.4f}_far{:2.4f}_pa{:2.4f}_pb{:2.4f}_rad{:2.4f}'\
+            .format(NUM,MAXFS,NEARL,FARL,FRIENDSHIP_RATIO,\
+                    FRIENDSHIP_INITIATE_PROB,RAD)
+PATH += '/img'
 
-def connections(mc,itt,X,Y,F,A,R):
+def ensure_dir(fn):
+  
+  dir = os.path.dirname(fn)
 
+  try:
+      os.stat(dir)
+  except:
+      os.mkdir(dir) 
+
+def get_colors(f):
+
+  scale = 1./255.
+  im = Image.open(f)
+  w,h = im.size
+  rgbim = im.convert('RGB')
+  colors = []
+  for i in xrange(0,w):
+    for j in xrange(0,h):
+      r,g,b = rgbim.getpixel((i,j))
+      colors.append((r*scale,g*scale,b*scale))
+
+  shuffle(colors)
+  return colors
+
+def connections(mc,itt,C,X,Y,F,A,R):
+
+  n_colors = len(C)
   indsx,indsy = F.nonzero()
   mask = indsx >= indsy 
   xx = []
   yy = []
+  colors = []
   for i,j in zip(indsx[mask],indsy[mask]):
     a = A[i,j]
     d = R[i,j]
@@ -54,12 +86,13 @@ def connections(mc,itt,X,Y,F,A,R):
     xp = X[i] - scales*cos(a)
     yp = Y[i] - scales*sin(a)
    
-    #r,g,b = self.colors[ (i*NUM+j) % self.n_colors ]
-    #self.ctx.set_source_rgba(r,g,b,ALPHA)
+    r,g,b = C[(i*NUM+j) % n_colors]
+
+    colors.extend([(r,g,b,ALPHA) for _ in xrange(GRAINS)])
     xx.extend(xp)
     yy.extend(yp)
-  
-  mc.dots(xx,yy,itt)
+ 
+  mc.dots(xx,yy,colors,itt)
 
 def set_distances(X,Y,A,R):
 
@@ -102,8 +135,10 @@ def make_friends(i,F,R):
 
 def main():
 
+  ensure_dir(PATH)
+
   rds = redis.Redis(host=HOST,port=PORT)
-  MC = MultiCanvas(rds,CANVAS_SIZE,GRID_SIZE,FILEPATH,FRONT,BACK)
+  MC = MultiCanvas(rds,CANVAS_SIZE,GRID_SIZE,PATH,FRONT,BACK)
 
   X = zeros(NUM,'float')
   Y = zeros(NUM,'float')
@@ -112,6 +147,8 @@ def main():
   R = zeros((NUM,NUM),'float')
   A = zeros((NUM,NUM),'float')
   F = zeros((NUM,NUM),'byte')
+
+  C = get_colors(COLOR_PATH)
 
   for i in xrange(NUM):
     the = random()*TWOPI
@@ -156,7 +193,7 @@ def main():
           k = randint(NUM)
           make_friends(k,F,R)
 
-        connections(MC,itt,X,Y,F,A,R)
+        connections(MC,itt,C,X,Y,F,A,R)
 
         if not itt%100:
           print 'itteration:',itt
