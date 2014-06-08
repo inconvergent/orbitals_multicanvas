@@ -2,11 +2,13 @@
 # -*- coding: utf-8 -*-
 
 import redis
-from multiprocessing import Process, Queue
+from multiprocessing import Process
 
 import cairo, Image
 import numpy as np
 from json import loads,dumps
+
+from itertools import product
 
 from numpy import sin, cos, pi, arctan2, square,sqrt, logical_not,\
                   linspace, array, zeros
@@ -19,13 +21,16 @@ TWOPI = pi*2.
 PORT = 6379
 HOST = 'localhost'
 
+FILEPATH = './img/test'
 #COLOR_PATH = 'color/dark_cyan_white_black.gif'
 
-NUM = 500 # number of nodes
+NUM = 200 # number of nodes
 MAXFS = 10 # max friendships pr node
 
-SIZE = 20000 # size of png image
-DRAW_ITT = 2000
+CANVAS_SIZE = 5000 # size of png image
+GRID_SIZE = 2
+
+DRAW_ITT = 1000
 
 BACK = [1.]*3
 FRONT = [0,0,0,0.05]
@@ -33,8 +38,7 @@ GRAINS = 40
 ALPHA = 0.05 # opacity of drawn points
 STEPS = 10000
 
-ONE = 1./SIZE
-STP = ONE/15.
+STP = 1./float(CANVAS_SIZE*GRID_SIZE)/5.
 
 RAD = 0.26 # radius of starting circle
 FARL  = 0.13 # ignore "enemies" beyond this radius
@@ -43,17 +47,80 @@ NEARL = 0.02 # do not attempt to approach friends close than this
 FRIENDSHIP_RATIO = 0.1 # probability of friendship dens
 FRIENDSHIP_INITIATE_PROB = 0.05 # probability of friendship initation attempt
 
+class MultiCanvas(object):
+
+  def __init__(self, rds,canvas_size,grid_size,filepath):
+
+    self.grid_size = grid_size
+    self.canvas_size = canvas_size
+    self.filepath = filepath
+    self.rds = rds
+
+    self.__init_canvases()
+    self.__start_canvases()
+
+  def __init_canvases(self):
+
+    self.canvases = []
+    self.num_canvases = self.grid_size**2
+    for i in xrange(self.num_canvases):
+
+      render = XRender(self.canvas_size,self.rds,i,self.filepath)
+      xrender = Process(target=render.run)
+
+      self.canvases.append(xrender)
+
+  def __start_canvases(self):
+
+    for xrender in self.canvases:
+      xrender.start()
+
+  def dots(self,x,y,itt):
+
+    xx = array(x,'float')
+    yy = array(y,'float')
+    ii = (array(xx)*self.grid_size).astype('int')
+    jj = (array(yy)*self.grid_size).astype('int')
+    cc = ii + jj*self.grid_size
+
+    h = 1./self.grid_size
+
+    for (i,j) in product(xrange(self.grid_size),repeat=2):
+      ch = i + j*self.grid_size
+      mask = ch == cc
+      xx_trans = (xx[mask]/h)-i
+      yy_trans = (yy[mask]/h)-j
+      data = { 'action':'DRAW',\
+               'x':list(xx_trans),\
+               'y':list(yy_trans),\
+               'itt':itt }
+      self.rds.rpush('c{:02d}'.format(ch),dumps(data))
+
+  def write_all(self,itt=0):
+    for ch in xrange(self.num_canvases):
+      self.rds.rpush('c{:02d}'.format(ch),dumps({'action':'WRITE','itt':itt}))
+
+  def stop_now(self,itt=0):
+    for ch in xrange(self.num_canvases):
+      self.rds.lpush('c{:02d}'.format(ch),dumps({'action':'KILL','itt':itt}))
+
+  def stop(self,itt=0):
+    for ch in xrange(self.num_canvases):
+      self.rds.rpush('c{:02d}'.format(ch),dumps({'action':'KILL','itt':itt}))
  
-class XRender():
+class XRender(object):
 
-  def __init__(self, rds, channel, path):
+  def __init__(self,canvas_size,rds,channel,path):
 
-    self.filename = path+'test_{:08d}_q{:s}.png'
+    self.filename = path+'_{:08d}_c{:02d}.png'
     self.channel = channel
+
+    self.canvas_size = canvas_size
+    self.one = 1./canvas_size
 
     self.rds = rds
 
-    self.rds.delete(channel)
+    self.rds.delete('c{:02d}'.format(self.channel))
 
     self.__init_cairo()
 
@@ -61,14 +128,14 @@ class XRender():
     
     ctx = self.ctx
     for x,y in zip(d['x'],d['y']):
-      ctx.rectangle(x,y,ONE,ONE)
+      ctx.rectangle(x,y,self.one,self.one)
       ctx.fill()
 
   def __init_cairo(self):
 
-    sur = cairo.ImageSurface(cairo.FORMAT_ARGB32,SIZE,SIZE)
+    sur = cairo.ImageSurface(cairo.FORMAT_ARGB32,self.canvas_size,self.canvas_size)
     ctx = cairo.Context(sur)
-    ctx.scale(SIZE,SIZE)
+    ctx.scale(self.canvas_size,self.canvas_size)
     ctx.set_source_rgb(*BACK)
     ctx.rectangle(0,0,1,1)
     ctx.fill()
@@ -82,7 +149,7 @@ class XRender():
 
     while True:
 
-      k,v = self.rds.blpop(self.channel)
+      k,v = self.rds.blpop('c{:02d}'.format(self.channel))
 
       d = loads(v)
       action = d['action']
@@ -90,7 +157,7 @@ class XRender():
       try:
         itt = d['itt']
         if not itt%100:
-          print 'draw',itt, self.rds.llen('1')
+          print 'draw',itt, self.rds.llen('c{:02d}'.format(self.channel))
       except KeyError:
         pass
 
@@ -101,7 +168,7 @@ class XRender():
       elif action == 'WRITE':
         itt = d['itt']
         fn = self.filename.format(itt,self.channel)
-        print self,'writing:',fn
+        print 'writing channel:',self.channel,fn
         self.sur.write_to_png(fn)
         continue
 
@@ -110,7 +177,7 @@ class XRender():
         break
 
 
-def connections(rds,itt,X,Y,F,A,R):
+def connections(mc,itt,X,Y,F,A,R):
 
   indsx,indsy = F.nonzero()
   mask = indsx >= indsy 
@@ -128,7 +195,7 @@ def connections(rds,itt,X,Y,F,A,R):
     xx.extend(xp)
     yy.extend(yp)
   
-  rds.rpush('1', dumps({'action':'DRAW','x':xx,'y':yy,'itt':itt}))
+  mc.dots(xx,yy,itt)
 
 def set_distances(X,Y,A,R):
 
@@ -172,10 +239,7 @@ def make_friends(i,F,R):
 def main():
 
   rds = redis.Redis(host=HOST,port=PORT)
-
-  render = XRender(rds,'1','/home/anders/x/xsandpaint/img/test')
-  xrender = Process(target=render.run)
-  xrender.start()
+  MC = MultiCanvas(rds,CANVAS_SIZE,GRID_SIZE,FILEPATH)
 
   X = zeros(NUM,'float')
   Y = zeros(NUM,'float')
@@ -228,23 +292,23 @@ def main():
           k = randint(NUM)
           make_friends(k,F,R)
 
-        connections(rds,itt,X,Y,F,A,R)
+        connections(MC,itt,X,Y,F,A,R)
 
         if not itt%100:
           print 'itteration:',itt
 
         if not itt%DRAW_ITT:
           if itt>0:
-            rds.rpush('1',dumps({'action':'WRITE','itt':itt}))
+            MC.write_all(itt)
 
       except KeyboardInterrupt:
-        rds.lpush('1',dumps({'action':'KILL','itt':itt}))
+        MC.stop_now(itt)
         break
 
   except Exception, e:
     raise
   finally:
-    rds.rpush('1',dumps({'action':'KILL','itt':itt}))
+    MC.stop(itt)
 
 
 if __name__ == "__main__":
