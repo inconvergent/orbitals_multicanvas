@@ -5,9 +5,9 @@ import Image
 import redis
 import os
 import numpy as np
-from numpy import sin, cos, pi, arctan2, square,sqrt, logical_not,\
-                  linspace, array, zeros
-from numpy.random import random, randint, shuffle
+from numpy import sin,cos,pi,arctan2,square,sqrt,logical_not,\
+                  linspace,array,zeros
+from numpy.random import random,randint,shuffle
 from multicanvas.MultiCanvas import MultiCanvas
 
 PI = pi
@@ -16,18 +16,15 @@ TWOPI = pi*2.
 PORT = 6379
 HOST = 'localhost'
 
-CANVAS_SIZE = 2000 # size of canvas
+CANVAS_SIZE = 20000 # size of canvas
 GRID_SIZE = 2 # number of canvases in each direction
 
-COLOR_PATH = '../colors/dark_cyan_white_black.gif'
-
-NUM = 50 # number of nodes
+NUM = 700 # number of nodes
 MAXFS = 10 # max friendships pr node
 
-DRAW_ITT = 500
+DRAW_ITT = 5000
 
 BACK = [1.]*3
-FRONT = [0,0,0,0.05]
 GRAINS = 20
 ALPHA = 0.05 # opacity of drawn points
 STEPS = 10**7
@@ -40,6 +37,8 @@ NEARL = 0.02 # do not attempt to approach friends close than this
 
 FRIENDSHIP_RATIO = 0.1 # probability of friendship dens
 FRIENDSHIP_INITIATE_PROB = 0.05 # probability of friendship initation attempt
+
+COLOR_PATH = '../colors/dark_cyan_white_black.gif'
 
 PATH = './cyan_gp_a'
 PATH += '_num{:d}_fs{:d}_near{:2.4f}_far{:2.4f}_pa{:2.4f}_pb{:2.4f}_rad{:2.4f}'\
@@ -138,7 +137,9 @@ def main():
   ensure_dir(PATH)
 
   rds = redis.Redis(host=HOST,port=PORT)
-  MC = MultiCanvas(rds,CANVAS_SIZE,GRID_SIZE,PATH,FRONT,BACK)
+
+  MC = MultiCanvas(redis.Redis(host=HOST,port=PORT),\
+                   CANVAS_SIZE,GRID_SIZE,PATH,BACK)
 
   X = zeros(NUM,'float')
   Y = zeros(NUM,'float')
@@ -147,7 +148,6 @@ def main():
   R = zeros((NUM,NUM),'float')
   A = zeros((NUM,NUM),'float')
   F = zeros((NUM,NUM),'byte')
-
   C = get_colors(COLOR_PATH)
 
   for i in xrange(NUM):
