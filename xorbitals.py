@@ -2,13 +2,10 @@
 # -*- coding: utf-8 -*-
 
 import redis
-
 import numpy as np
-
 from numpy import sin, cos, pi, arctan2, square,sqrt, logical_not,\
                   linspace, array, zeros
 from numpy.random import random, randint, shuffle
-
 from multicanvas.MultiCanvas import MultiCanvas
 
 PI = pi
@@ -17,14 +14,14 @@ TWOPI = pi*2.
 PORT = 6379
 HOST = 'localhost'
 
-FILEPATH = './img/test'
+CANVAS_SIZE = 10000 # size of canvas
+GRID_SIZE = 2 # number of canvases in each direction
+
+FILEPATH = './img/img'
 #COLOR_PATH = 'color/dark_cyan_white_black.gif'
 
 NUM = 200 # number of nodes
 MAXFS = 10 # max friendships pr node
-
-CANVAS_SIZE = 5000 # size of png image
-GRID_SIZE = 2
 
 DRAW_ITT = 1000
 
