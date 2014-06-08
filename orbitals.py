@@ -29,7 +29,7 @@ BACK = [1.]*3
 FRONT = [0,0,0,0.05]
 GRAINS = 40
 ALPHA = 0.05 # opacity of drawn points
-STEPS = 10000
+STEPS = 10**7
 
 STP = 1./float(CANVAS_SIZE*GRID_SIZE)/15.
 
