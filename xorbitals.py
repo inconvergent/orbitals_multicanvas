@@ -2,18 +2,14 @@
 # -*- coding: utf-8 -*-
 
 import redis
-from multiprocessing import Process
 
-import cairo, Image
 import numpy as np
-from json import loads,dumps
-
-from itertools import product
 
 from numpy import sin, cos, pi, arctan2, square,sqrt, logical_not,\
                   linspace, array, zeros
 from numpy.random import random, randint, shuffle
 
+from multicanvas.MultiCanvas import MultiCanvas
 
 PI = pi
 TWOPI = pi*2.
@@ -46,135 +42,6 @@ NEARL = 0.02 # do not attempt to approach friends close than this
 
 FRIENDSHIP_RATIO = 0.1 # probability of friendship dens
 FRIENDSHIP_INITIATE_PROB = 0.05 # probability of friendship initation attempt
-
-class MultiCanvas(object):
-
-  def __init__(self, rds,canvas_size,grid_size,filepath):
-
-    self.grid_size = grid_size
-    self.canvas_size = canvas_size
-    self.filepath = filepath
-    self.rds = rds
-
-    self.__init_canvases()
-    self.__start_canvases()
-
-  def __init_canvases(self):
-
-    self.canvases = []
-    self.num_canvases = self.grid_size**2
-    for i in xrange(self.num_canvases):
-
-      render = XRender(self.canvas_size,self.rds,i,self.filepath)
-      xrender = Process(target=render.run)
-
-      self.canvases.append(xrender)
-
-  def __start_canvases(self):
-
-    for xrender in self.canvases:
-      xrender.start()
-
-  def dots(self,x,y,itt):
-
-    xx = array(x,'float')
-    yy = array(y,'float')
-    ii = (array(xx)*self.grid_size).astype('int')
-    jj = (array(yy)*self.grid_size).astype('int')
-    cc = ii + jj*self.grid_size
-
-    h = 1./self.grid_size
-
-    for (i,j) in product(xrange(self.grid_size),repeat=2):
-      ch = i + j*self.grid_size
-      mask = ch == cc
-      xx_trans = (xx[mask]/h)-i
-      yy_trans = (yy[mask]/h)-j
-      data = { 'action':'DRAW',\
-               'x':list(xx_trans),\
-               'y':list(yy_trans),\
-               'itt':itt }
-      self.rds.rpush('c{:02d}'.format(ch),dumps(data))
-
-  def write_all(self,itt=0):
-    for ch in xrange(self.num_canvases):
-      self.rds.rpush('c{:02d}'.format(ch),dumps({'action':'WRITE','itt':itt}))
-
-  def stop_now(self,itt=0):
-    for ch in xrange(self.num_canvases):
-      self.rds.lpush('c{:02d}'.format(ch),dumps({'action':'KILL','itt':itt}))
-
-  def stop(self,itt=0):
-    for ch in xrange(self.num_canvases):
-      self.rds.rpush('c{:02d}'.format(ch),dumps({'action':'KILL','itt':itt}))
- 
-class XRender(object):
-
-  def __init__(self,canvas_size,rds,channel,path):
-
-    self.filename = path+'_{:08d}_c{:02d}.png'
-    self.channel = channel
-
-    self.canvas_size = canvas_size
-    self.one = 1./canvas_size
-
-    self.rds = rds
-
-    self.rds.delete('c{:02d}'.format(self.channel))
-
-    self.__init_cairo()
-
-  def work(self, d):
-    
-    ctx = self.ctx
-    for x,y in zip(d['x'],d['y']):
-      ctx.rectangle(x,y,self.one,self.one)
-      ctx.fill()
-
-  def __init_cairo(self):
-
-    sur = cairo.ImageSurface(cairo.FORMAT_ARGB32,self.canvas_size,self.canvas_size)
-    ctx = cairo.Context(sur)
-    ctx.scale(self.canvas_size,self.canvas_size)
-    ctx.set_source_rgb(*BACK)
-    ctx.rectangle(0,0,1,1)
-    ctx.fill()
-
-    ctx.set_source_rgba(*FRONT)
-
-    self.sur = sur
-    self.ctx = ctx
-
-  def run(self):
-
-    while True:
-
-      k,v = self.rds.blpop('c{:02d}'.format(self.channel))
-
-      d = loads(v)
-      action = d['action']
-
-      try:
-        itt = d['itt']
-        if not itt%100:
-          print 'draw',itt, self.rds.llen('c{:02d}'.format(self.channel))
-      except KeyError:
-        pass
-
-      if action == 'DRAW':
-
-        self.work(d)
-
-      elif action == 'WRITE':
-        itt = d['itt']
-        fn = self.filename.format(itt,self.channel)
-        print 'writing channel:',self.channel,fn
-        self.sur.write_to_png(fn)
-        continue
-
-      elif action == 'KILL':
-        print self, 'done!'
-        break
 
 
 def connections(mc,itt,X,Y,F,A,R):
@@ -239,7 +106,7 @@ def make_friends(i,F,R):
 def main():
 
   rds = redis.Redis(host=HOST,port=PORT)
-  MC = MultiCanvas(rds,CANVAS_SIZE,GRID_SIZE,FILEPATH)
+  MC = MultiCanvas(rds,CANVAS_SIZE,GRID_SIZE,FILEPATH,FRONT,BACK)
 
   X = zeros(NUM,'float')
   Y = zeros(NUM,'float')
